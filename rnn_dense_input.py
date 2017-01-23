@@ -15,6 +15,9 @@ In particular:
 where J has ones on the diagonal from the bottom left to the upper right, and
     f(z) = 1 / (1 + e^{-z})
     g(z_m) = e^{z_m} / sum e^{z_k}
+    
+This version multiplies the full one-of-n encoding by the input weight matrix
+wich is inefficient
 """
 
 import numpy as np
@@ -33,12 +36,12 @@ __y = T.nnet.softmax
 
 
 
-def rnn(i_t,s_tm1,U,W,b) : 
+def rnn(x_t,s_tm1,U,W,b) : 
     """ A single neuron in the recursive network
     
         Input
         
-        i_t   - one-of-n index encoding
+        x_t   - input at the t-th stage of the rnn
         s_tm1 - output from the previous stage of the rnn
         U     - weight matrix for x_t
         W     - weight matrix for s_tm1
@@ -49,17 +52,17 @@ def rnn(i_t,s_tm1,U,W,b) :
         s_t   - output of the t-th stage of the rnn
     """
     
-    return __f(U[:,i_t] + W.dot(s_tm1) + b)
+    return __f(U.dot(x_t) + W.dot(s_tm1) + b)
 
     
-def compute_network_outputs(i,s0,V,U,W,b) : 
+def compute_network_outputs(x,s0,V,U,W,b) : 
     """ Builds the recursive network using theano's scan iterator. This 
         is a bidirectional rnn where we simply add the outputs of the 
         rnns in both directions. 
         
         Input
         
-        i    - array of one-of-n indices representing a sentence
+        x    - matrix of inputs, one for each recursive level of the rnn
         s0   - initial output of the rnn
         V    - weight matrix for softmax step
         U    - weight matrix for the input to the recursive neuron
@@ -72,25 +75,25 @@ def compute_network_outputs(i,s0,V,U,W,b) :
     """
     
     fwrd_rslt,_ = theano.scan(rnn,
-                              sequences = [i],
+                              sequences = [x],
                               outputs_info = [s0],
                               non_sequences = [U,W,b])
     bwrd_rslt,_ = theano.scan(rnn,
-                              sequences = [i[::-1]],
+                              sequences = [x[::-1]],
                               outputs_info = [s0],
                               non_sequences = [U,W,b])
     
     return __y(T.dot(fwrd_rslt + bwrd_rslt, V.T))
 
 
-def compute_mean_log_lklyhd_outputs(I,J,s0,V,U,W,b) : 
+def compute_mean_log_lklyhd_outputs(X,Y,s0,V,U,W,b) : 
     """ Builds theano symbolic representation of the mean log likelyhood
         loss function for the embedding model. 
         
         Input
     
-        I    - domain inputs as 3D tensor
-        J    - range outputs as 3D tensor: rows are assumed to be standard 
+        X    - domain inputs as 3D tensor
+        Y    - range outputs as 3D tensor: rows are assumed to be standard 
                basis vectors
         s0   - initial output of the rnn
         V    - weight matrix for softmax step
@@ -105,17 +108,16 @@ def compute_mean_log_lklyhd_outputs(I,J,s0,V,U,W,b) :
         
     # the function to scan over - it just collects the log likelyhood of 
     # the positions indicated by y given x and the weight matrices
-    def scan_f(i,j,s0,V,U,W,b) : 
+    def scan_f(x,y,s0,V,U,W,b) : 
         
-        outs = compute_network_outputs(i,s0,V,U,W,b)
+        outs = compute_network_outputs(x,s0,V,U,W,b)
         
         # y is zero except for one one in each row so it's ok to
         # multiply then sum then take the log
-
-        return T.log(theano.scan(lambda j_t,o : o[j_t],sequences = [j,outs])[0]) 
+        return T.log(T.sum(outs*y,axis=1)) 
     
     batch_outputs,_ = theano.scan(scan_f,
-                                  sequences = [I,J],
+                                  sequences = [X,Y],
                                   non_sequences = [s0,V,U,W,b])
     
     return T.mean(batch_outputs)
@@ -144,8 +146,7 @@ class embedding_model :
                  k,   # dimension of embedding space
                  seed = None,
                  s0 = None,
-                 int_dtype = 'int64',
-                 float_dtype = floatX
+                 dtype = floatX
                  ) : 
         """ Model initializer
         
@@ -161,8 +162,7 @@ class embedding_model :
         self.n = n
         self.k = k
         self.seed = seed
-        self.int_dtype = int_dtype
-        self.float_dtype = float_dtype
+        self.dtype = dtype
         
         # seed the random generator if requested
         if seed is not None : 
@@ -170,34 +170,34 @@ class embedding_model :
             
         # collect s0
         if s0 is None : 
-            self.s0 = theano.shared(np.zeros(k,dtype = self.float_dtype),name='s0')
+            self.s0 = theano.shared(np.zeros(k,dtype = self.dtype),name='s0')
         else : 
-            self.s0 = theano.shared(np.array(s0,dtype = self.float_dtype),name='s0')
+            self.s0 = theano.shared(np.array(s0,dtype = self.dtype),name='s0')
         
         # initialize the weights
         self.V = theano.shared(np.array(np.random.rand(n,k),
-                                        dtype = self.float_dtype),name='V')
+                                        dtype = self.dtype),name='V')
         self.U = theano.shared(np.array(np.random.rand(k,n),
-                                        dtype = self.float_dtype),name='U')
+                                        dtype = self.dtype),name='U')
         self.W = theano.shared(np.array(np.random.rand(k,k),
-                                        dtype = self.float_dtype),name='W')
+                                        dtype = self.dtype),name='W')
         self.b = theano.shared(np.array(np.random.rand(k),
-                                        dtype = self.float_dtype),name='b')  
+                                        dtype = self.dtype),name='b')  
         
         # shared variables for mean gradient magnitudes
-        self.m_dV_mag = theano.shared(np.array(np.inf,dtype = self.float_dtype),
+        self.m_dV_mag = theano.shared(np.array(np.inf,dtype = self.dtype),
                                       name='m_dV_mag')
-        self.m_dU_mag = theano.shared(np.array(np.inf,dtype = self.float_dtype),
+        self.m_dU_mag = theano.shared(np.array(np.inf,dtype = self.dtype),
                                       name='m_dU_mag')
-        self.m_dW_mag = theano.shared(np.array(np.inf,dtype = self.float_dtype),
+        self.m_dW_mag = theano.shared(np.array(np.inf,dtype = self.dtype),
                                       name='m_dW_mag')
-        self.m_db_mag = theano.shared(np.array(np.inf,dtype = self.float_dtype),
+        self.m_db_mag = theano.shared(np.array(np.inf,dtype = self.dtype),
                                       name='m_db_mag')
         
         # shared variables for computing the loss
-        self.loss_accum = theano.shared(np.array(0.,dtype = self.float_dtype),
+        self.loss_accum = theano.shared(np.array(0.,dtype = self.dtype),
                                         name='loss_accum')
-        self.loss_accum_i = theano.shared(np.array(0.,dtype = self.float_dtype),
+        self.loss_accum_i = theano.shared(np.array(0.,dtype = self.dtype),
                                           name='loss_accum_i')
         
         # compute the network
@@ -212,26 +212,26 @@ class embedding_model :
         """
         
         # build the network
-        self.i = T.vector('i',dtype = self.int_dtype)
+        self.x = T.matrix('x',dtype = self.dtype)
         
-        self.network_outputs = compute_network_outputs(self.i,self.s0,self.V,
+        self.network_outputs = compute_network_outputs(self.x,self.s0,self.V,
                                                        self.U,self.W,self.b)
         
         
         # build mean log likelyhood loss
         
         # the samples are provided as a tensor to support batching of SGD
-        self.I = T.matrix('I',dtype = self.int_dtype)
-        self.J = T.matrix('J',dtype = self.int_dtype) # for embedding I = J
+        self.X = T.tensor3('X',dtype = self.dtype)
+        self.Y = T.tensor3('Y',dtype = self.dtype) # for embedding Y = X
         
-        self.loss_outputs = compute_mean_log_lklyhd_outputs(self.I,self.J,
+        self.loss_outputs = compute_mean_log_lklyhd_outputs(self.X,self.Y,
                                                             self.s0,self.V,
                                                             self.U,self.W,
                                                             self.b)
 
         # set up the accumulator for computing the loss in batches
         
-        n_minibatch = self.I.shape[0]
+        n_minibatch = self.X.shape[0]
         loss_accum_ipnm = self.loss_accum_i + n_minibatch
         
         self.loss_updates = ((self.loss_accum,
@@ -258,7 +258,7 @@ class embedding_model :
         # get the sgd update function
         
         # this is the learning parameter
-        self.eta = T.scalar('eta',dtype = self.float_dtype)
+        self.eta = T.scalar('eta',dtype = self.dtype)
         
         
         self.m_dV_mag = theano.shared(0.,name='m_dV_mag')
@@ -269,7 +269,7 @@ class embedding_model :
         
         # also including a running average of the gradient magnitudes
         
-        self.sgd_i = T.scalar('sgd_i',dtype = self.float_dtype)
+        self.sgd_i = T.scalar('sgd_i',dtype = self.dtype)
         
         dV_mag_accum = (self.dV_mag/(self.sgd_i+1.)
                             + self.m_dV_mag*(self.sgd_i/(self.sgd_i+1.)))
@@ -280,8 +280,7 @@ class embedding_model :
         db_mag_accum = (self.db_mag/(self.sgd_i+1.) 
                             + self.m_db_mag*(self.sgd_i/(self.sgd_i+1.)))
         
-        # adding here since we are taking a max of the loss - accumulators
-        # do not include the latest values
+        # adding here since we are taking a max of the loss
         self.sgd_updates = ((self.V,self.V + self.eta*self.dV),
                             (self.U,self.U + self.eta*self.dU),
                             (self.W,self.W + self.eta*self.dW),
@@ -304,7 +303,7 @@ class embedding_model :
         if self.network is not None : 
             return
             
-        self.network = theano.function(inputs = [self.i],
+        self.network = theano.function(inputs = [self.x],
                                        outputs = self.network_outputs)
         
     def compile_loss(self) : 
@@ -314,7 +313,7 @@ class embedding_model :
         if self.loss is not None : 
             return
             
-        self.loss = theano.function(inputs = [self.I,self.J],
+        self.loss = theano.function(inputs = [self.X,self.Y],
                                     outputs = self.loss_outputs,
                                     updates = self.loss_updates)
         
@@ -325,7 +324,7 @@ class embedding_model :
         if self.grad_loss is not None : 
             return
             
-        self.grad_loss = theano.function(inputs = [self.I,self.J],
+        self.grad_loss = theano.function(inputs = [self.X,self.Y],
                                          outputs = [self.dV,self.dU,
                                                     self.dW,self.db])
         
@@ -336,7 +335,7 @@ class embedding_model :
         if self.sgd_update is not None : 
             return
 
-        self.sgd_update = theano.function(inputs = [self.I,self.J,
+        self.sgd_update = theano.function(inputs = [self.X,self.Y,
                                                     self.eta,self.sgd_i],
                                           outputs = [],
                                           updates = self.sgd_updates)
@@ -350,21 +349,21 @@ class embedding_model :
 
         # note that this returns the PREVIOUS loss value - using 
         # the weights before the update
-        theano_f = theano.function(inputs = [self.I,self.J,
+        theano_f = theano.function(inputs = [self.X,self.Y,
                                              self.eta,self.sgd_i],
                                    outputs = self.loss_outputs,
                                    updates = self.sgd_updates)
         
         self.sgd_update_w_loss = theano_f
                 
-    def batch_optimize(self,_I,_J,tol = 1E-5) : 
+    def batch_optimize(self,_X,_Y,tol = 1E-5) : 
         """ Optimize the model using BFGS. This is only for toy problems and 
             serves as a reality check on stochastic gradient descent. 
             
             Input
             
-            _I       - matrix of domain index samples
-            _J       - matrix of range index samples
+            _X       - 3D tensor of domain samples
+            _Y       - 3D tensor of range samples
             tol      - tolerance for the optimizer
             
             Output
@@ -381,15 +380,15 @@ class embedding_model :
         # I would factor this out as it is lengthy, but since it is just 
         # validation code I have left it as-is
         
-        V = T.matrix('V_bo',dtype = self.float_dtype)
-        W = T.matrix('W_bo',dtype = self.float_dtype)
-        U = T.matrix('U_bo',dtype = self.float_dtype)
-        b = T.vector('b_bo',dtype = self.float_dtype)
+        V = T.matrix('V_bo',dtype = self.dtype)
+        W = T.matrix('W_bo',dtype = self.dtype)
+        U = T.matrix('U_bo',dtype = self.dtype)
+        b = T.vector('b_bo',dtype = self.dtype)
 
-        I = theano.shared(np.array(_I,dtype = self.int_dtype),'X_bo')
-        J = theano.shared(np.array(_J,dtype = self.int_dtype),'X_bo')
+        X = theano.shared(np.array(_X,dtype = self.dtype),'X_bo')
+        Y = theano.shared(np.array(_Y,dtype = self.dtype),'X_bo')
         
-        loss_outputs = compute_mean_log_lklyhd_outputs(I,J,self.s0,V,U,W,b)
+        loss_outputs = compute_mean_log_lklyhd_outputs(X,Y,self.s0,V,U,W,b)
 
         loss = theano.function(inputs = [V,U,W,b],
                                outputs = loss_outputs)
@@ -429,7 +428,7 @@ class embedding_model :
             
         n = self.n
         k = self.k
-        x0 = np.zeros(2*n*k+k**2+k,dtype = self.float_dtype)
+        x0 = np.zeros(2*n*k+k**2+k,dtype = self.dtype)
         
         x0[:n*k] = self.V.get_value().flatten()
         x0[n*k:2*n*k] = self.U.get_value().flatten()
