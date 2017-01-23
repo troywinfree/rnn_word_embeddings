@@ -370,7 +370,7 @@ class word_embedder :
             
             sgd_i = float(self.minibatch_i)
             
-            logger.info('sgd update')
+            self.logger.info('sgd update')
             
             self.model.sgd_update(minibatch,minibatch,eta,sgd_i)
             
