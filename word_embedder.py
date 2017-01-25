@@ -354,7 +354,7 @@ class word_embedder :
         
         for j in range(self.n_test_loss_batches) : 
             
-            self.logger.info("batch %d of %d"%(j,self.n_test_loss_batches))
+            self.logger.info("batch %d of %d"%(j+1,self.n_test_loss_batches))
             
             j0 = j*self.test_loss_batch_size
             j1 = (j+1)*self.test_loss_batch_size
