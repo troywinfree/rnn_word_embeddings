@@ -231,7 +231,7 @@ class embedding_model :
 
         # set up the accumulator for computing the loss in batches
         
-        n_minibatch = self.I.shape[0]
+        n_minibatch = T.cast(self.I.shape[0],self.float_dtype)
         loss_accum_ipnm = self.loss_accum_i + n_minibatch
         
         self.loss_updates = ((self.loss_accum,
@@ -361,6 +361,9 @@ class embedding_model :
         """ Optimize the model using BFGS. This is only for toy problems and 
             serves as a reality check on stochastic gradient descent. 
             
+            This will not work with 'L-BFGS-B' if float_dtype is not float64 
+            see https://github.com/scipy/scipy/issues/5832
+            
             Input
             
             _I       - matrix of domain index samples
@@ -392,18 +395,20 @@ class embedding_model :
         loss_outputs = compute_mean_log_lklyhd_outputs(I,J,self.s0,V,U,W,b)
 
         loss = theano.function(inputs = [V,U,W,b],
-                               outputs = loss_outputs)
+                               outputs = loss_outputs,
+                               allow_input_downcast = True)
         
         (dV,dU,
          dW,db) = theano.grad(loss_outputs,[V,U,W,b])
         
         grad_loss = theano.function(inputs = [V,U,W,b],
-                                    outputs = [dV,dU,dW,db])
+                                    outputs = [dV,dU,dW,db],
+                                    allow_input_downcast = True)
         
         # define the objective an jacobian
         
         def objective(x,n,k) : 
-            
+
             V = x[:n*k].reshape(n,k)
             U = x[n*k:2*n*k].reshape(k,n)
             W = x[2*n*k:2*n*k+k**2].reshape(k,k)
@@ -412,7 +417,7 @@ class embedding_model :
             return -loss(V,U,W,b)
             
         def jac(x,n,k) : 
-            
+
             V = x[:n*k].reshape(n,k)
             U = x[n*k:2*n*k].reshape(k,n)
             W = x[2*n*k:2*n*k+k**2].reshape(k,k)

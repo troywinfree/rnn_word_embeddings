@@ -6,17 +6,15 @@ Created on Sun Jan  8 17:14:05 2017
 @author: troywinfree
 """
 
-import numpy as np
-
 from collections import Counter
-
-from rnn import embedding_model
-
+import logging
+import time
+import pickle
+import gzip
+import numpy as np
 import theano
 
-import logging
-
-import time
+from rnn import embedding_model
 
 floatX = theano.config.floatX
 
@@ -120,9 +118,9 @@ def get_one_of_n_indices(vocabulary,sentences,
     
     n_vocab = len(vocabulary)
 
-    if dtype(n_vocab) != n_vocab : 
+    if np.array(n_vocab,dtype=dtype) != n_vocab : 
         raise ValueError("Provided dtype cannot represent size of vocabulary")
-    if dtype(-1) != -1 : 
+    if np.array(-1,dtype=dtype) != -1 : 
         raise ValueError("Provided dtype must be signed")
     
     # using counter since if a key is not in a counter
@@ -145,7 +143,7 @@ class word_embedder :
                  model,
                  minibatch_size,
                  eval_test_loss_stride,
-                 test_loss_batch_size,
+                 n_test_loss_batches,
                  seed = None,
                  logger = logging
                  ) :
@@ -163,7 +161,8 @@ class word_embedder :
             minibatch_size        - number of sentences to use in a minibatch
             eval_test_loss_stride - number of minibatches between loss test
                                     loss evaluations
-            test_loss_batch_size  - number of test sentences in a loss batch
+            n_test_loss_batches   - number of batches over which to accumulate 
+                                    test loss
             seed                  - seed for random shuffle after each epoch,
             logger                - logging object
         """
@@ -174,14 +173,15 @@ class word_embedder :
         self.training_data_size = len(training_data)
         self.training_indices = np.arange(self.training_data_size)
         self.test_data = test_data
+        self.test_data_size = len(self.test_data)
         self.model = model
         self.minibatch_size = minibatch_size
         self.eval_test_loss_stride = eval_test_loss_stride
-        self.test_loss_batch_size = test_loss_batch_size
+        self.n_test_loss_batches = n_test_loss_batches
         
-        self.n_test_loss_batches = len(self.test_data)
-        self.n_test_loss_batches /= self.test_loss_batch_size
-        self.n_test_loss_batches = int(np.ceil(self.n_test_loss_batches))
+        self.test_loss_batch_size = self.test_data_size
+        self.test_loss_batch_size /= self.n_test_loss_batches
+        self.test_loss_batch_size = int(np.ceil(self.test_loss_batch_size))
  
         self.seed = 0
         if seed is not None : 
@@ -212,7 +212,7 @@ class word_embedder :
                                     embedding_space_dim,
                                     minibatch_size,
                                     eval_test_loss_stride,
-                                    test_loss_batch_size,
+                                    n_test_loss_batches,
                                     nof1_dtype = np.int16,
                                     float_dtype = floatX,
                                     shuffle_seed = None,
@@ -235,7 +235,8 @@ class word_embedder :
             minibatch_size        - number of sentences in a minibatch
             eval_test_loss_stride - number of minibatches between test loss
                                     evaluations
-            test_loss_batch_size  - number of test sentences in loss batch 
+            n_test_loss_batches   - number of batches over which to accumulate 
+                                    test loss 
             nof1_dtype            - integer type to use in storing one-of-n
                                     index arrays
             float_dtype           - numeric type for use in rnn model weights
@@ -243,7 +244,13 @@ class word_embedder :
             model_seed            - seed for rnn model weight initialization
             embedder_seed         - seed for random shuffle after each epoch
             logger                - logging object
+            
+            Output :
+                
+            word_embedder instance
         """
+        
+        start = time.perf_counter()
         
         # read the sentences from the disk
         logger.info('reading sentences from %s'%sentences_path)
@@ -251,7 +258,6 @@ class word_embedder :
          words,
          counts,
          vocabulary) = read_sentences(sentences_path,n_vocabulary)
-        logger.info('reading sentences complete')
         
         # get the one of n indices
         logger.info('computing one-of-n indices')
@@ -273,8 +279,11 @@ class word_embedder :
         model = embedding_model(n_vocabulary,
                                 embedding_space_dim,
                                 model_seed,
-                                nof1_dtype,
-                                float_dtype)
+                                int_dtype = nof1_dtype,
+                                float_dtype = float_dtype)
+        
+        elapsed = time.perf_counter() - start
+        logger.info('init from sentences elapsed time = %fs'%elapsed)
         
         return cls(vocabulary,
                    training_data,
@@ -282,9 +291,53 @@ class word_embedder :
                    model,
                    minibatch_size,
                    eval_test_loss_stride,
-                   test_loss_batch_size,
-                   embedder_seed)      
-       
+                   n_test_loss_batches,
+                   embedder_seed,
+                   logger)      
+    
+    @classmethod
+    def init_from_pickle(cls,
+                         file_path,
+                         logger = logging) : 
+        """ Initialize from pickled data
+        
+            Inputs : 
+                
+            file_path    - path to file into which to dump the pickle
+            logger       - logging object
+            
+            Output : 
+                
+            word_embedder instance
+        """
+        
+        with gzip.open(file_path,'rb') as gzip_file : 
+            out = pickle.load(gzip_file)
+            
+        out.logger = logging
+        
+        return out
+        
+    
+    def dump(self,file_path) : 
+        """ Pickle the data. The logger cannot be pickled so is set to None 
+            and then restored
+            
+            Inputs : 
+                
+            file_path  - path to file into which to dump the pickle
+        """
+        
+        # save the logger and then set it to None
+        logger = self.logger
+        self.logger = None
+        
+        with gzip.open(file_path,'wb') as gzip_file : 
+            pickle.dump(self,gzip_file,protocol = pickle.HIGHEST_PROTOCOL)
+         
+        # restore the logger
+        self.logger = logger
+    
     def accumulate_loss(self) : 
         """ Accumulate the value of the loss function on the test data across
             self.n_test_loss_batches batches
@@ -293,8 +346,7 @@ class word_embedder :
                 
             value of the loss function on the test data      
         """
-        
-        
+             
         self.logger.info("accumulating loss")
         
         self.model.loss_accum.set_value(0.)
@@ -381,6 +433,11 @@ class word_embedder :
             self.m_dW_mag.append(self.model.m_dW_mag.get_value())
             self.m_db_mag.append(self.model.m_db_mag.get_value())
             
+            self.logger.info('mean dV magnitude = %17.17f'%self.m_dV_mag[-1])
+            self.logger.info('mean dU magnitude = %17.17f'%self.m_dU_mag[-1])
+            self.logger.info('mean dW magnitude = %17.17f'%self.m_dW_mag[-1])
+            self.logger.info('mean db magnitude = %17.17f'%self.m_db_mag[-1])
+            
             # check convergence criteria
             
             if i % self.eval_test_loss_stride == 0 : 
@@ -394,6 +451,8 @@ class word_embedder :
                 
                 self.test_loss.append((self.minibatch_i,
                                        self.accumulate_loss()))
+                
+                self.logger.info('test loss = %17.17f'%self.test_loss[-1][1])
                 
                 # save the weights and biases if the loss is the best yet
                 if self.test_loss[-1][1] >= self.best_test_loss[1] : 
@@ -459,5 +518,16 @@ class word_embedder :
                 
             self.minibatch_i += 1
 
+        elapsed = time.perf_counter() - start
+                                   
         self.logger.info('stopping code = %s'%stopping_code)
+        self.logger.info('total run time %fs'%elapsed)
+        self.logger.info('ended at minibatch %d'%self.minibatch_i)
+        self.logger.info('test loss last evaluated at minibatch %d'%self.test_loss[-1][0])
+        self.logger.info('last test loss i  = %17.17'%self.test_loss[-1][1])
+        self.logger.info('mean dV magnitude = %17.17f'%self.m_dV_mag[-1])
+        self.logger.info('mean dU magnitude = %17.17f'%self.m_dU_mag[-1])
+        self.logger.info('mean dW magnitude = %17.17f'%self.m_dW_mag[-1])
+        self.logger.info('mean db magnitude = %17.17f'%self.m_db_mag[-1])
+        
         return stopping_code

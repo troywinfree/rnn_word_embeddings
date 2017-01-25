@@ -10,15 +10,9 @@ import unittest
 
 import numpy as np
 
-import theano
-floatX = theano.config.floatX
-
 from rnn import embedding_model
 from rnn_dense_input import embedding_model as embedding_model_dense
 
-#import theano
-#theano.config.cxx = '/usr/bin/g++'
-#theano.config.openmp = True
 
 class test_rnn(unittest.TestCase) :
     """
@@ -30,15 +24,16 @@ class test_rnn(unittest.TestCase) :
         """
         initialize the embedding model
         """
+        
+        cls.int_dtype = 'int16'
+        cls.float_dtype = 'float64'
+        
         cls.n = 3 # dimension of inputs
         cls.m = 4 # number of recursive layers in the model
         cls.k = 2 # dimension of embedding space
         cls.batch_n = 500 # batch size
-        cls.eta = 0.1 # learning hyperparameter (scale on the gradient)
+        cls.eta = np.array(0.1,dtype=cls.float_dtype) # learning hyperparameter (scale on the gradient)
         cls.seed = 102 # seed for random initialization of the weight matrices
-        
-        cls.int_dtype = 'int64'
-        cls.float_dtype = floatX
         
         # initialize the model
         cls.model = embedding_model(cls.n,cls.k,cls.seed,
