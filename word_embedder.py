@@ -131,7 +131,7 @@ def get_one_of_n_indices(vocabulary,sentences,
     return np.array([[vocab_map[token]-1 for token in sentence]
                                      for sentence in sentences],dtype = dtype)
         
-
+    
 class word_embedder : 
     """ Class for training a word embedding RNN
     """
@@ -203,7 +203,7 @@ class word_embedder :
         self.m_dU_mag = []
         self.m_dW_mag = []
         self.m_db_mag = []
-    
+        
     @classmethod
     def init_from_sentences_on_disk(cls,
                                     sentences_path,
@@ -311,10 +311,20 @@ class word_embedder :
             word_embedder instance
         """
         
+        # unpickle
         with gzip.open(file_path,'rb') as gzip_file : 
             out = pickle.load(gzip_file)
-            
+         
+        # set the logger
         out.logger = logging
+        
+        # compile the theano functions as needed
+        for key in out.compiled_flags : 
+            if out.compiled_flags[key] is True : 
+                getattr(out.model,'compile_%s'%key)()
+        
+        # delete the flags
+        del out.compiled_flags
         
         return out
         
@@ -332,9 +342,27 @@ class word_embedder :
         logger = self.logger
         self.logger = None
         
+        names = ['network','loss','grad_loss',
+                 'sgd_update','sgd_update_w_loss']
+        
+        self.compiled_flags = dict()
+        
+        # record which theano functions are compiled and set those
+        # that are to None - we cannot pickle compiled functions
+        for name in names : 
+            if getattr(self.model,name) is not None : 
+                self.compiled_flags[name] = True
+                setattr(self.model,name,None)
+            else : 
+                self.compiled_flags[name] = False
+
+        # pickle it
         with gzip.open(file_path,'wb') as gzip_file : 
             pickle.dump(self,gzip_file,protocol = pickle.HIGHEST_PROTOCOL)
          
+        # delete the flags
+        del self.compiled_flags
+            
         # restore the logger
         self.logger = logger
     
@@ -512,9 +540,12 @@ class word_embedder :
              
             # check if we have been running too long
             elapsed = time.perf_counter() - start
+            self.logger.info('elpased time = %fs'%elapsed)
             if elapsed > max_seconds : 
                 
                 stopping_code = "Exceeded time limit of %fs. Elapsed = %fs"%(max_seconds,elapsed)
+                
+                break
                 
             self.minibatch_i += 1
 
@@ -524,7 +555,7 @@ class word_embedder :
         self.logger.info('total run time %fs'%elapsed)
         self.logger.info('ended at minibatch %d'%self.minibatch_i)
         self.logger.info('test loss last evaluated at minibatch %d'%self.test_loss[-1][0])
-        self.logger.info('last test loss i  = %17.17'%self.test_loss[-1][1])
+        self.logger.info('last test loss i  = %17.17f'%self.test_loss[-1][1])
         self.logger.info('mean dV magnitude = %17.17f'%self.m_dV_mag[-1])
         self.logger.info('mean dU magnitude = %17.17f'%self.m_dU_mag[-1])
         self.logger.info('mean dW magnitude = %17.17f'%self.m_dW_mag[-1])

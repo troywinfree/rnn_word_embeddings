@@ -9,10 +9,10 @@ RNN for word embedding experiements. This is just a bidirectional version of
 https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/rvecs.pdf
 
 In particular:
-    s_+(t) = f(Uw(t) + Ws(t-1) + b)
-    s_-(t) = f(UJw(t) + Ws(t+1) + b)
+    s_+(t) = f(Uw(t) + Ws_+(t-1) + b)
+    s_-(t) = f(Uw(m-t) + Ws_-(t-1) + b)
     y(t) = g(Vs_+(t) + Vs_-(t))
-where J has ones on the diagonal from the bottom left to the upper right, and
+and
     f(z) = 1 / (1 + e^{-z})
     g(z_m) = e^{z_m} / sum e^{z_k}
     
@@ -127,12 +127,11 @@ class embedding_model :
     """ Bidirectional RNN for experimenting with word embeddings. The model is
         the following
            
-        s_+(t) = f(Uw(t) + Ws(t-1) + b)
-        s_-(t) = f(UJw(t) + Ws(t+1) + b)
+        s_+(t) = f(Uw(t) + Ws_+(t-1) + b)
+        s_-(t) = f(Uw(m-t) + Ws_-(t-1) + b)
         y(t) = g(Vs_+(t) + Vs_-(t))
         
-        where J has ones on the diagonal from the bottom left to the upper 
-        right, and
+        and
         
         f(z) = 1 / (1 + e^{-z})
         g(z_m) = e^{z_m} / sum e^{z_k}
@@ -179,19 +178,20 @@ class embedding_model :
                                         dtype = self.dtype),name='V')
         self.U = theano.shared(np.array(np.random.rand(k,n),
                                         dtype = self.dtype),name='U')
-        self.W = theano.shared(np.array(np.random.rand(k,k),
-                                        dtype = self.dtype),name='W')
+        # initializing with full matrix can lead to vanishing gradients
+        self.W = theano.shared(np.array(np.diag(np.random.rand(k)),
+                                        dtype=self.dtype),name='W')
         self.b = theano.shared(np.array(np.random.rand(k),
                                         dtype = self.dtype),name='b')  
         
         # shared variables for mean gradient magnitudes
-        self.m_dV_mag = theano.shared(np.array(np.inf,dtype = self.dtype),
+        self.m_dV_mag = theano.shared(np.array(0.,dtype = self.dtype),
                                       name='m_dV_mag')
-        self.m_dU_mag = theano.shared(np.array(np.inf,dtype = self.dtype),
+        self.m_dU_mag = theano.shared(np.array(0.,dtype = self.dtype),
                                       name='m_dU_mag')
-        self.m_dW_mag = theano.shared(np.array(np.inf,dtype = self.dtype),
+        self.m_dW_mag = theano.shared(np.array(0.,dtype = self.dtype),
                                       name='m_dW_mag')
-        self.m_db_mag = theano.shared(np.array(np.inf,dtype = self.dtype),
+        self.m_db_mag = theano.shared(np.array(0.,dtype = self.dtype),
                                       name='m_db_mag')
         
         # shared variables for computing the loss
@@ -259,13 +259,6 @@ class embedding_model :
         
         # this is the learning parameter
         self.eta = T.scalar('eta',dtype = self.dtype)
-        
-        
-        self.m_dV_mag = theano.shared(0.,name='m_dV_mag')
-        self.m_dU_mag = theano.shared(0.,name='m_dU_mag')
-        self.m_dW_mag = theano.shared(0.,name='m_dW_mag')
-        self.m_db_mag = theano.shared(0.,name='m_db_mag')
-        
         
         # also including a running average of the gradient magnitudes
         
@@ -340,7 +333,7 @@ class embedding_model :
                                           outputs = [],
                                           updates = self.sgd_updates)
         
-    def compile_sgd_update_with_loss_output(self) : 
+    def compile_sgd_update_w_loss_output(self) : 
         """ Compile SGD update function with PREVIOUS loss output
         """
         

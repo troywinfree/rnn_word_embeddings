@@ -105,7 +105,7 @@ class test_rnn(unittest.TestCase) :
          b_opt) = self.model.batch_optimize(self.I,self.J,tol)
         
         # compile the sgd update
-        self.model.compile_sgd_update_with_loss_output()
+        self.model.compile_sgd_update_w_loss_output()
 
         # now do some gradient descent
         loss = -np.inf
