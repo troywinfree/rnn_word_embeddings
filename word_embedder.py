@@ -190,9 +190,12 @@ class word_embedder :
         
         self.logger = logger
         
-        self.test_loss = [(-1,-np.inf)]
-        self.best_test_loss = (-1,-np.inf)
+        self.test_loss = [(0,-np.inf)]
+        self.best_test_loss = (0,-np.inf)
         self.minibatch_i = 0
+        
+        self.training_minibatches = [0]
+        self.training_times = [0.]
         
         self.best_V = self.model.V.get_value()
         self.best_U = self.model.U.get_value()
@@ -316,7 +319,7 @@ class word_embedder :
             out = pickle.load(gzip_file)
          
         # set the logger
-        out.logger = logging
+        out.logger = logger
         
         # compile the theano functions as needed
         for key in out.compiled_flags : 
@@ -326,9 +329,48 @@ class word_embedder :
         # delete the flags
         del out.compiled_flags
         
-        return out
-        
+        return cls.init_from_dict(out.__dict__)
     
+
+    @classmethod
+    def init_from_dict(cls,
+                       object_dict) : 
+        """ Initialize from a dictionary of data. Data is only soft copied. 
+            Should only be used to trasfer old pickled data to updated 
+            object model.
+            
+            Inputs : 
+                
+            object_dict - object dictionary to soft copy
+            
+            Output : 
+                
+            word_embedder instance
+        """
+        
+        init_names = ['vocabulary',
+                      'training_data',
+                      'test_data',
+                      'model',
+                      'minibatch_size',
+                      'eval_test_loss_stride',
+                      'n_test_loss_batches',
+                      'seed']
+        
+        for name in init_names : 
+            if name not in object_dict : 
+                raise ValueError('Invalid object_dict should contain %s key'%name)
+        
+        # initialize an embedder
+        out = cls(*[object_dict[name] for name in init_names])
+        
+        for key in object_dict : 
+            if (key in init_names) or (hasattr(out,key) is False) : 
+                continue
+            setattr(out,key,object_dict[key])
+            
+        return out
+
     def dump(self,file_path) : 
         """ Pickle the data. The logger cannot be pickled so is set to None 
             and then restored
@@ -420,6 +462,10 @@ class word_embedder :
         """
         
         self.logger.info("training")
+        self.logger.info("eta               = %17.17f"%eta)
+        self.logger.info("test_loss_epsilon = %17.17f"%test_loss_epsilon)
+        self.logger.info("grad_mag_epsilon  = %17.17f"%grad_mag_epsilon)
+        self.logger.info("max_seconds       = %17.17f"%max_seconds)
         
         # the stopping code
         stopping_code = 'Reached max number of minibatches (%d)'%n_minibatches
@@ -431,7 +477,8 @@ class word_embedder :
         
         start = time.perf_counter()
         
-        for i in range(n_minibatches) : 
+        cnt = 0
+        for i in range(self.minibatch_i,self.minibatch_i+n_minibatches) : 
             
             # get the minibatch
             
@@ -442,13 +489,15 @@ class word_embedder :
                 # we reached the end of the data
                 i1 = self.training_data_size
             
-            self.logger.info('minibatch %d of %d, training indices [%d, %d]'%(i+1,n_minibatches,i0,i1))
+            cnt += 1
+            self.logger.info('minibatch %d of %d, training indices [%d, %d]'%(cnt,n_minibatches,i0,i1))
             
             minibatch = self.training_data[self.training_indices[i0:i1]]
             
             # compute an update
             
             sgd_i = float(self.minibatch_i)
+            self.minibatch_i += 1
             
             self.logger.info('sgd update')
             
@@ -547,13 +596,16 @@ class word_embedder :
                 
                 break
                 
-            self.minibatch_i += 1
-
         elapsed = time.perf_counter() - start
                                    
+        self.training_minibatches.append(self.minibatch_i)
+        self.training_times.append(elapsed)
+                                   
         self.logger.info('stopping code = %s'%stopping_code)
-        self.logger.info('total run time %fs'%elapsed)
-        self.logger.info('ended at minibatch %d'%self.minibatch_i)
+        self.logger.info('training run time %fs'%elapsed)
+        self.logger.info('total elapsed training run time %fs'%elapsed)
+        self.logger.info('ended at minibatch %d of %d'%(cnt,n_minibatches))
+        self.logger.info('total minibatches %d'%self.minibatch_i)
         self.logger.info('test loss last evaluated at minibatch %d'%self.test_loss[-1][0])
         self.logger.info('last test loss i  = %17.17f'%self.test_loss[-1][1])
         self.logger.info('mean dV magnitude = %17.17f'%self.m_dV_mag[-1])
