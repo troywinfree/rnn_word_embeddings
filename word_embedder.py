@@ -607,7 +607,7 @@ class word_embedder :
         self.logger.info('ended at minibatch %d of %d'%(cnt,n_minibatches))
         self.logger.info('total minibatches %d'%self.minibatch_i)
         self.logger.info('test loss last evaluated at minibatch %d'%self.test_loss[-1][0])
-        self.logger.info('last test loss i  = %17.17f'%self.test_loss[-1][1])
+        self.logger.info('last test loss    = %17.17f'%self.test_loss[-1][1])
         self.logger.info('mean dV magnitude = %17.17f'%self.m_dV_mag[-1])
         self.logger.info('mean dU magnitude = %17.17f'%self.m_dU_mag[-1])
         self.logger.info('mean dW magnitude = %17.17f'%self.m_dW_mag[-1])
