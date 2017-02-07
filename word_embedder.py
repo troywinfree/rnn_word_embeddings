@@ -45,6 +45,7 @@ def get_logger(name,
     
     return logger
 
+
 def read_sentences(path,n_vocabulary) : 
     """ Read sentences from the disk and collect the words, word counts
         and vocabulary. 
@@ -190,11 +191,19 @@ class word_embedder :
         
         self.logger = logger
         
+        # a list of pairs of the form (minibatch number, loss)
         self.test_loss = [(0,-np.inf)]
+        
         self.best_test_loss = (0,-np.inf)
+        
+        # the total number of minibatches run so far
         self.minibatch_i = 0
         
+        # list of indices giving minibatch counts at which training sessions
+        # have been run
         self.training_minibatches = [0]
+        
+        # list of times for training sessions
         self.training_times = [0.]
         
         self.best_V = self.model.V.get_value()
@@ -202,6 +211,7 @@ class word_embedder :
         self.best_W = self.model.W.get_value()
         self.best_b = self.model.b.get_value()
         
+        # mean gradient magnitudes - recorded every minibatch iteration
         self.m_dV_mag = []
         self.m_dU_mag = []
         self.m_dW_mag = []

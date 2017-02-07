@@ -35,7 +35,6 @@ __f = T.nnet.sigmoid
 __y = T.nnet.softmax
 
 
-
 def rnn(x_t,s_tm1,U,W,b) : 
     """ A single neuron in the recursive network
     

@@ -32,7 +32,6 @@ __f = T.nnet.sigmoid
 __y = T.nnet.softmax
 
 
-
 def rnn(i_t,s_tm1,U,W,b) : 
     """ A single neuron in the recursive network
     
@@ -89,9 +88,8 @@ def compute_mean_log_lklyhd_outputs(I,J,s0,V,U,W,b) :
         
         Input
     
-        I    - domain inputs as 3D tensor
-        J    - range outputs as 3D tensor: rows are assumed to be standard 
-               basis vectors
+        I    - matrix of one-of-n indices representing input sentences
+        J    - matrix of one-of-n indices representing target sentences
         s0   - initial output of the rnn
         V    - weight matrix for softmax step
         U    - weight matrix for the input to the recursive neuron
@@ -104,15 +102,13 @@ def compute_mean_log_lklyhd_outputs(I,J,s0,V,U,W,b) :
     """
         
     # the function to scan over - it just collects the log likelyhood of 
-    # the positions indicated by y given x and the weight matrices
+    # the positions indicated by j given i and the weight matrices
     def scan_f(i,j,s0,V,U,W,b) : 
         
         outs = compute_network_outputs(i,s0,V,U,W,b)
         
-        # y is zero except for one one in each row so it's ok to
-        # multiply then sum then take the log
-
-        return T.log(theano.scan(lambda j_t,o : o[j_t],sequences = [j,outs])[0]) 
+        return T.log(theano.scan(lambda j_t,o : o[j_t],
+                                 sequences = [j,outs])[0]) 
     
     batch_outputs,_ = theano.scan(scan_f,
                                   sequences = [I,J],
@@ -220,7 +216,7 @@ class embedding_model :
         
         # build mean log likelyhood loss
         
-        # the samples are provided as a tensor to support batching of SGD
+        # variables for a batch of sentences
         self.I = T.matrix('I',dtype = self.int_dtype)
         self.J = T.matrix('J',dtype = self.int_dtype) # for embedding I = J
         
